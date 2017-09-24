@@ -1,0 +1,527 @@
+---
+title: Is there any differences between one-term Prsidents and multi-terms Presidents
+  in their nomination and inaugural speeches?
+output:
+  html_document: default
+  html_notebook: default
+---
+
+Nomination and inaugural speeches are the first step of Presidents. These speeches indicate what Presidents advocate and what's intended policy they would conduct during tenure, which undoubtedly affect the decision of voters. However, some Presidents owned only one term while others perfromed two-or-more terms? What's the reason? Is it possible that these can be seen from their nominaiton and inaugural speeches, which convey their thoughts directly to voters? 
+In this project, we would analyze the nomination and inaugural speeches of past presidents, and try to figure out whether there is any differences between those one-term Presidens and multi-terms Presidents in their speeches, or on the opposite way, their differences cannot be figured out from just speeches. 
+
+
+### Step I: Environment preparation --- check and install needed packages.
+```{r, message=FALSE, warning=FALSE}
+packages.used=c("rvest", "tibble", "qdap", "sentimentr", 
+                "gplots", "dplyr","tm", "syuzhet", 
+                "factoextra", "gridExtra", "scales", "RColorBrewer",
+                "RANN", "topicmodels","wordcloud","tidytext","ggridges","ggplot2")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], packages.used))
+
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE,
+                   repos='http://cran.us.r-project.org')
+}
+
+# load packages
+library("rvest")
+library("tibble")
+library("qdap")
+library("sentimentr")
+library("gplots")
+library("dplyr")
+library("tm")
+library("syuzhet")
+library("factoextra")
+library("scales")
+library("RColorBrewer")
+library("RANN")
+library("topicmodels")
+library("wordcloud")
+library("tidytext")
+library("gridExtra")
+library('ggridges')
+library('ggplot2')
+
+source("../lib/plotstacked.R")
+source("../lib/speechFuncs.R")
+```
+
+###Step II: Data collection and first-step processing.
+
+In this project, we select all inaugural and some of nomination speeches of past presidents.
+
+#####Scrape speech URLs from <http://www.presidency.ucsb.edu/>
+
+```{r, message=FALSE, warning=FALSE}
+## Inaugural speeches
+# Get link URLs
+main.page <- read_html(x = "http://www.presidency.ucsb.edu/inaugurals.php")
+inaug=f.speechlinks(main.page)
+tail(inaug,5)
+inaug=inaug[-nrow(inaug),]   # Remove the last line, irrelevant due to error
+
+## Nomination speeches
+main.page=read_html("http://www.presidency.ucsb.edu/nomination.php")
+# Get link URLs
+nomin <- f.speechlinks(main.page)
+tail(nomin,5)
+```
+
+##### Prepare CSV datasets for the scraped speeches from speech metadata posted on <http://www.presidency.ucsb.edu/>
+
+```{r}
+inaug.list=read.csv("../data/inauglist.csv", stringsAsFactors = FALSE)
+nomin.list=read.csv("../data/nominlist.csv", stringsAsFactors = FALSE)
+
+speech.list=rbind(inaug.list, nomin.list)
+speech.list$type=c(rep("inaug", nrow(inaug.list)),
+                   rep("nomin", nrow(nomin.list)))
+nomin<-nomin[-47,]   #Delete a redundant row in nomin
+speech.url=rbind(inaug, nomin)
+speech.list=cbind(speech.list, speech.url)  #Combine original list with URLs
+```
+
+##### Scrap the main texts of speeches from the speech URLs
+
+```{r}
+speech.list$fulltext=NA
+for(i in 1:nrow(speech.list)) {
+    text <- read_html(speech.list$urls[i]) %>%   #Load the page
+    html_nodes(".displaytext") %>%    #Isloate the text
+    html_text()    #Get the text
+    speech.list$fulltext[i]=text
+    # Create the file name
+    filename <- paste0("../data/fulltext/", 
+                     speech.list$type[i],
+                     speech.list$File[i], "-", 
+                     speech.list$Term[i], ".txt")
+    sink(file = filename) %>%    #Open file to write 
+    cat(text)    #Write the file
+    sink()    #Close the file
+}
+```
+
+##### Subset the dataset
+
+In order to dicover any differences between one-term Presidents and multi-terms Presidents in their inaugural and nomination speeches, We have first to subset the whold speech dataset into several small directed parts, such as prepare a dataset for inaugural speeches of those one-term presidents as single_term_inaug_speech.list.
+
+```{r}
+## Inaugural speeches
+first_inaug_speech.list<-speech.list %>% filter(type=='inaug',Term==1)
+first_inaug_speech.list[18,'President']<-'Grover Cleveland'
+first_inaug_speech.list[18,'File']<-'GroverCleveland'
+
+secondormore_inaug_speech.list<-speech.list %>% filter(type=='inaug',Term>=2)
+secondormore_inaug_speech.list[8,'President']<-'Grover Cleveland'
+secondormore_inaug_speech.list[8,'File']<-'GroverCleveland'
+
+multi_terms_inaug_files<-unique(secondormore_inaug_speech.list[,'File'])
+# The first inaugural speech for the Presidents with multi-terms
+multi_terms_inaug_speech1.list<-first_inaug_speech.list %>% filter(File%in%multi_terms_inaug_files)
+single_term_inaug_speech.list<-first_inaug_speech.list %>% filter(!(File%in%multi_terms_inaug_files))
+  
+## Nomination speeches
+single_term_presid<-unique(single_term_inaug_speech.list[,'President'])
+multi_terms_presid<-unique(multi_terms_inaug_speech1.list[,'President'])
+
+first_nomin_speech.list<-speech.list %>% filter(type=='nomin',Term==1)
+secondormore_nomin_speech.list<-speech.list %>% filter(type=='nomin',Term>=2, President%in%multi_terms_presid)
+# The first nomination speech for the Presidents with multi-terms
+multi_terms_nomin_speech1.list<-first_nomin_speech.list %>% filter(President%in%multi_terms_presid)
+single_term_nomin_speech.list<-first_nomin_speech.list %>% filter(President%in%single_term_presid)
+```
+
+### Step III: Word Frequency Analysis
+
+What would be the differnces between one-term Prsidents and multi-terms Presidents in their inaugural and nomination speeches? Let's start from the simplest aspect. What about the word frequency? Is it possible that those one-term Presidents prefered to use some kinds of wrods, while those multi-terms Presients tend to have an opposites way? Let's find something interesting. 
+
+First of all, for speeches we first need to clean them up, such as remove those whitespace, change all the letters into lower cases, and remove english common stopwords, etc.
+
+##### Clean the speeches:
+
+```{r}
+## Create a function to general clean those text datasets
+clean_dataset<-function(list, after){
+  after<-Corpus(VectorSource(list))
+  after<-tm_map(after, stripWhitespace)
+  after<-tm_map(after, content_transformer(tolower))
+  after<-tm_map(after, removeNumbers)
+  after<-tm_map(after, removeWords, stopwords('english'))
+  after<-tm_map(after, removeWords, character(0))
+  after<-tm_map(after, removePunctuation)
+  after<-tm_map(after, stemDocument)
+  return(after)
+}
+
+## First inaugural speeches (single-term)
+single_inaug<-clean_dataset(single_term_inaug_speech.list$fulltext, single_inaug)
+
+## First inaugural speeches (multi-terms)
+multi_first_inaug<-clean_dataset(multi_terms_inaug_speech1.list$fulltext, multi_first_inaug)
+
+## Second inaugural speeches (multi-terms)
+multi_second_inaug<-clean_dataset(secondormore_inaug_speech.list$fulltext, multi_second_inaug)
+
+## First nomination speeches (single-term)
+single_nomin<-clean_dataset(single_term_nomin_speech.list$fulltext, single_nomin)
+
+## First nomination speeches (multi-term)
+multi_first_nomin<-clean_dataset(multi_terms_nomin_speech1.list$fulltext, multi_first_nomin)
+
+## Second nomination speeches (second-term)
+multi_second_nomin<-clean_dataset(secondormore_nomin_speech.list$fulltext, multi_second_nomin)
+```
+
+##### Build a term-document matrix:
+Document matrix is a table containing the frequency of the words.
+
+```{r}
+## Create a function to build term-document matix and return a dataframe with frequency
+build_tdm<-function(corpus, df_name){
+  tdm<-TermDocumentMatrix(corpus)
+  m<-as.matrix(tdm)
+  v<-sort(rowSums(m), decreasing=TRUE)
+  df_name<-data.frame(word=names(v), freq=v, row.names=1:length(v))
+  return(df_name)
+}
+
+## Inaugural speeches
+single_inaug_tdm<-build_tdm(single_inaug, single_inaug_tdm)
+head(single_inaug_tdm, 10)
+multi_first_inaug_tdm<-build_tdm(multi_first_inaug, multi_first_inaug_tdm)
+head(multi_first_inaug_tdm, 10)
+multi_second_inaug_tdm<-build_tdm(multi_second_inaug, multi_second_inaug_tdm)
+head(multi_second_inaug_tdm, 10)
+
+## Nomination speeches
+single_nomin_tdm<-build_tdm(single_nomin, single_nomin_tdm)
+head(single_nomin_tdm, 10)
+multi_first_nomin_tdm<-build_tdm(multi_first_nomin, multi_first_nomin_tdm)
+head(multi_first_inaug_tdm, 10)
+multi_second_nomin_tdm<-build_tdm(multi_second_nomin, multi_second_nomin_tdm)
+head(multi_second_inaug_tdm, 10)
+```
+
+Let's see more clear in Word Cloud plots.
+
+##### Generate the Word Cloud:
+
+```{r,fig.width=10, fig.height=10}
+par(oma=c(1,1,2,1),bg='beige')
+layout(rbind(1,cbind(2,3)))
+## Inaugural speeches
+set.seed(2017)
+wordcloud(single_inaug_tdm$word, freq=single_inaug_tdm$freq, max.words=100, min.freq=3,
+          random.order=FALSE, rot.per=0.35, colors=brewer.pal(8,'Dark2'), use.r.layout=TRUE)
+mtext('Single-term',side=1,at=0.5,line=2,cex=1,font=2,col='navyblue')
+
+wordcloud(multi_first_inaug_tdm$word, freq=multi_first_inaug_tdm$freq, max.words=100, min.freq=3,
+          random.order=FALSE, rot.per=0.35, colors=brewer.pal(8,'Dark2'), use.r.layout=TRUE)
+mtext('Multi-terms(1st)',side=1,at=0.5,line=2,cex=1,font=2,col='navyblue')
+
+wordcloud(multi_second_inaug_tdm$word, freq=multi_second_inaug_tdm$freq, max.words=100, min.freq=3,
+          random.order=FALSE, rot.per=0.35, colors=brewer.pal(8,'Dark2'), use.r.layout=TRUE)
+mtext('Multi-terms(2nd)',side=1,at=0.5,line=2,cex=1,font=2,col='navyblue')
+
+mtext('Wordclouds of Inaugural Speeches of Single and Multi-terms',
+      side=3,line=-2,cex=1.8,font=2,outer=TRUE,col='navyblue')
+```
+
+```{r, fig.width=10, fig.height=10}
+par(oma=c(1,1,2,1),bg='beige')
+layout(rbind(1,cbind(2,3)))
+##Nomination speeches
+wordcloud(single_nomin_tdm$word, freq=single_nomin_tdm$freq, max.words=100, min.freq=3,
+          random.order=FALSE, rot.per=0.35, colors=brewer.pal(8,'Dark2'), use.r.layout=TRUE)
+mtext('Single-term',side=1,at=0.5,line=2,cex=1,font=2,col='navyblue')
+
+wordcloud(multi_first_nomin_tdm$word, freq=multi_first_nomin_tdm$freq, max.words=100, min.freq=3,
+          random.order=FALSE, rot.per=0.35, colors=brewer.pal(8,'Dark2'), use.r.layout=TRUE)
+mtext('Multi-terms(1st)',side=1,at=0.5,line=2,cex=1,font=2,col='navyblue')
+
+wordcloud(multi_second_nomin_tdm$word, freq=multi_second_nomin_tdm$freq, max.words=100, min.freq=3,
+          random.order=FALSE, rot.per=0.35, colors=brewer.pal(8,'Dark2'), use.r.layout=TRUE)
+mtext('Multi-terms(2nd)',side=1,at=0.5,line=2,cex=1,font=2,col='navyblue')
+
+mtext('Wordclouds of Nomination Speeches of Single and Multi-terms',
+      side=3,line=-2,cex=1.8,font=2,outer=TRUE,col='navyblue')
+```
+
+As we can see, there is no much distinct difference in inaugural speeches, they all indicated much about anticipations and concerns about the development of whole nation and people, also the responsibility of governement. However, except those, Presidents who had only one term were more likely to emphasize something about 'power' in their inaugural speeches, which is less common in those multi-terms' inaugural speeches.
+
+In nomination speeches, somthing chages a little. Presidents who had multi-terms prefered to metion the word 'american', which perhaps indicated more ssense of unity than just 'people', more ofter than in those one-term's speeches. Additionally, it is obvious that in multi-terms' speeches, Presidents refered much to the word 'new', which appeared more a less in those one-term speeches. One more thing is that, in multi-terms' speeches, since those Presidents had finished their first term, they always mentioned the word, 'president', in their speeches, that is because they hoped to remind people their successful President-time before, which can increase their confidences. 
+
+### Step IV: Analysis of length of sentences 
+
+What kinds of sentences do President prefer? Short sentence is more likely to motivate people's excetiments and morales, while long sentence tends to be more reliable and unstandable. Would those one-term Presidents tend to use longer sentence with many words than those Presidents owned muti-terms? Let's find somthing interesting from this aspect.
+
+##### Generate the lists of sentences
+
+```{r, message=FALSE, warning=FALSE}
+## Build a function that can create sentence lists and get emotions and valence
+create_sent_list<-function(list,sent_list){
+  for(i in 1:nrow(list)){
+  sentences=sent_detect(list$fulltext[i],
+                        endmarks=c('?', '.', '!', '|', ';'))
+  if(length(sentences)>0){
+    # get emotions and valence from NRC dictionary
+    emotions=get_nrc_sentiment(sentences)
+    word.count=word_count(sentences)
+    emotions=diag(1/(word.count+0.01))%*%as.matrix(emotions)
+    sent_list=rbind(sent_list, 
+                    cbind(list[i,-ncol(list)], 
+                          sentences=as.character(sentences), 
+                          word.count,
+                          emotions,
+                          sent.id=1:length(sentences)))
+  }
+  }
+  return(sent_list)
+}
+## Inaugural speeches
+single_term_inaug_sent.list<-NULL
+single_term_inaug_sent.list<-create_sent_list(single_term_inaug_speech.list,
+                                              single_term_inaug_sent.list)%>%filter(!is.na(word.count)) 
+multi_terms_inaug_sent1.list<-NULL
+multi_terms_inaug_sent1.list<-create_sent_list(multi_terms_inaug_speech1.list,
+                                               multi_terms_inaug_sent1.list)%>%filter(!is.na(word.count))
+multi_terms_inaug_sent2.list<-NULL
+multi_terms_inaug_sent2.list<-create_sent_list(secondormore_inaug_speech.list,
+                                               multi_terms_inaug_sent2.list)%>%filter(!is.na(word.count))
+## Nomination speeches
+single_term_nomin_sent.list<-NULL
+single_term_nomin_sent.list<-create_sent_list(single_term_nomin_speech.list,single_term_nomin_sent.list)%>%filter(!is.na(word.count))%>%filter(!is.na(File))
+
+multi_terms_nomin_sent1.list<-NULL
+multi_terms_nomin_sent1.list<-create_sent_list(multi_terms_nomin_speech1.list,
+                                               multi_terms_nomin_sent1.list)%>%filter(!is.na(word.count))
+multi_terms_nomin_sent2.list<-NULL
+multi_terms_nomin_sent2.list<-create_sent_list(secondormore_nomin_speech.list,
+                                          multi_terms_nomin_sent2.list)%>%filter(!is.na(word.count)) 
+```
+
+##### Create ridge line plots for the number of words in each sentence:
+```{r,fig.height=6,fig.width=6}
+## Inaugural speeches
+ggplot(data=single_term_inaug_sent.list, aes(x=word.count, 
+                                             y=reorder(President,word.count,mean)))+
+  geom_density_ridges(fill='khaki1',alpha=0.5)+
+  theme(axis.text.y=element_text(size=9), axis.text.x=element_text(face='bold',size=9),
+        plot.title=element_text(face='bold.italic',size=15))+
+  scale_x_continuous(breaks=c(seq(0,50,10),seq(50,125,25)),labels=c(seq(0,50,10),seq(50,125,25)))+
+  labs(x='Numbe of Words / Per Sentence',y='',title='Inaugural Speech (single-term)')
+
+ggplot(data=multi_terms_inaug_sent1.list, aes(x=word.count, 
+                                             y=reorder(President,word.count,mean)))+
+  geom_density_ridges(fill='khaki1',alpha=0.5)+
+  theme(axis.text.y=element_text(size=9), axis.text.x=element_text(face='bold',size=9),
+        plot.title=element_text(face='bold.italic',size=15))+
+  scale_x_continuous(breaks=c(seq(0,50,10),seq(50,125,25)),labels=c(seq(0,50,10),seq(50,125,25)))+
+  labs(x='Numbe of Words / Per Sentence',y='',title='Inaugural Speech (multi-terms (1st))')
+
+ggplot(data=multi_terms_inaug_sent2.list, aes(x=word.count, 
+                                             y=reorder(President,word.count,mean)))+
+  geom_density_ridges(fill='khaki1',alpha=0.5)+
+  theme(axis.text.y=element_text(size=9), axis.text.x=element_text(face='bold',size=9),
+        plot.title=element_text(face='bold.italic',size=15))+
+  scale_x_continuous(breaks=c(seq(0,50,10),seq(50,125,25)),labels=c(seq(0,50,10),seq(50,125,25)))+
+  labs(x='Numbe of Words / Per Sentence',y='',title='Inaugural Speech (multi-terms (2nd))')
+
+```
+
+From ridge plots shown above, we can see that, in inaugural speeches, Presidents who owned only one term averagely tended to have 15 words in each sentence, and most of the sectences focused on 10-25 words, except some Presidents, like James Madison and Zachary Taylor, who also prefered longer sentences with more than 30 words per sentence, as well as completely diverse length of sentence in whold speeches. While for those presidents who owned multi-terms, the average length of sentence in their speeches shifts towards right a little bit, which is roughly 20 words per sentence, and what's more, most of them prefered diverse length of sentence rather than all short ones or long ones. 
+
+```{r}
+par(mfrow=c(1,3))
+## Nomination speeches
+ggplot(data=single_term_nomin_sent.list, aes(x=word.count, 
+                                             y=reorder(President,word.count,mean)))+
+  geom_density_ridges(fill='khaki1',alpha=0.5)+
+  theme(axis.text.y=element_text(size=9), axis.text.x=element_text(face='bold',size=9),
+        plot.title=element_text(face='bold.italic',size=15))+
+  scale_x_continuous(breaks=c(seq(0,50,10),seq(50,125,25)),labels=c(seq(0,50,10),seq(50,125,25)))+
+  labs(x='Numbe of Words / Per Sentence',y='',title='Nomination Speech (single-term)')
+
+ggplot(data=multi_terms_nomin_sent1.list, aes(x=word.count, 
+                                             y=reorder(President,word.count,mean)))+
+  geom_density_ridges(fill='khaki1',alpha=0.5)+
+  theme(axis.text.y=element_text(size=9), axis.text.x=element_text(face='bold',size=9),
+        plot.title=element_text(face='bold.italic',size=15))+
+  scale_x_continuous(breaks=c(seq(0,50,10),seq(50,125,25)),labels=c(seq(0,50,10),seq(50,125,25)))+
+  labs(x='Numbe of Words / Per Sentence',y='',title='Nomination Speech (multi-terms (1st))')
+
+ggplot(data=multi_terms_nomin_sent2.list, aes(x=word.count, 
+                                             y=reorder(President,word.count,mean)))+
+  geom_density_ridges(fill='khaki1',alpha=0.5)+
+  theme(axis.text.y=element_text(size=9), axis.text.x=element_text(face='bold',size=9),
+        plot.title=element_text(face='bold.italic',size=15))+
+  scale_x_continuous(breaks=c(seq(0,50,10),seq(50,125,25)),labels=c(seq(0,50,10),seq(50,125,25)))+
+  labs(x='Numbe of Words / Per Sentence',y='',title='Nomination Speech (multi-terms (2nd))')
+```
+
+From ridge plots shown above, we can see that, in one-term nomination speeches, Presidents prefered to have roughly 10 words in each sentence, and most of the sectences focused on 5-20 words. While in the first-term speech for president who owned multi-terms, the average length of sentence in their speeches shifts towards right a little bit, which is roughly 15 words per sentence, and the diversity of the length of sentences compacted a lot. Additionally, in the second-or-more-term speeches, those Presidents prefered more less words than before, the average number of words per sentence shift towards left a little. 
+
+### Step V: Sentiment Analysis
+
+We have evaluate the differences in word frequencies and length of sentences. What about the sentiments inside the speeches? How the Presidents shift between different setiments in their speeches. Is their any differnce among their terms?
+
+##### Examples for sentiments charged in sentences
+```{r}
+## Inaugural speeches
+print("Franklin D. Roosevelt")
+speech.df=tbl_df(multi_terms_inaug_sent1.list)%>%
+  filter(File=="FranklinDRoosevelt", word.count>=5)%>%
+  select(sentences, anger:trust)
+speech.df=as.data.frame(speech.df)
+as.character(speech.df$sentences[apply(speech.df[,-1], 2, which.max)])
+
+## Nomination speeches
+print("William J. Clinton")
+speech.df=tbl_df(multi_terms_inaug_sent2.list)%>%
+  filter(File=="WilliamJClinton", word.count>=5)%>%
+  select(sentences, anger:trust)
+speech.df=as.data.frame(speech.df)
+as.character(speech.df$sentences[apply(speech.df[,-1], 2, which.max)])
+```
+
+```{r, fig.width=14, fig.height=7}
+par(mfrow=c(1,2),mar=c(2,4,4,2))
+# Inaugural speeches
+single_term_inaug_emo.mean<-colMeans(select(single_term_inaug_sent.list, anger:trust)>0.01)
+multi_terms_inaug_emo.mean1<-colMeans(select(multi_terms_inaug_sent1.list, anger:trust)>0.01)
+multi_terms_inaug_emo.mean2<-colMeans(select(multi_terms_inaug_sent2.list, anger:trust)>0.01)
+inaug_emo.mean<-as.data.frame(cbind(single_term_inaug_emo.mean, multi_terms_inaug_emo.mean1, 
+                      multi_terms_inaug_emo.mean2),
+                      col.names=c('single-term','multi-terms(1st)','multi-terms(2nd)'))
+
+Col<-c('coral3','goldenrod1','darkolivegreen3')
+barplot(t(inaug_emo.mean),col=Col,beside=TRUE,ylim=c(0,0.7),border=FALSE,las=1)
+segments(1,seq(0,0.7,0.1),251,seq(0,0.7,0.1),lwd=1,col='lightgrey')
+legend(x=3,y=0.7,fill=Col,bty='n',cex=1, 
+       legend=c('single-term','multi-terms(1st)','multi-terms(2nd)'))
+mtext('Inaugural Speeches',side=3,line=1,cex=1.5,font=2)
+
+#Nomination speeches
+single_term_nomin_emo.mean<-colMeans(select(single_term_nomin_sent.list, anger:trust)>0.01)
+multi_terms_nomin_emo.mean1<-colMeans(select(multi_terms_nomin_sent1.list, anger:trust)>0.01)
+multi_terms_nomin_emo.mean2<-colMeans(select(multi_terms_nomin_sent2.list, anger:trust)>0.01)
+nomin_emo.mean<-as.data.frame(cbind(single_term_nomin_emo.mean, multi_terms_nomin_emo.mean1, 
+                      multi_terms_nomin_emo.mean2),
+                      col.names=c('single-term','multi-terms(1st)','multi-terms(2nd)'))
+
+Col<-c('coral3','goldenrod1','darkolivegreen3')
+barplot(t(nomin_emo.mean),col=Col,beside=TRUE,ylim=c(0,0.7),border=FALSE,las=1)
+segments(1,seq(0,0.7,0.1),251,seq(0,0.7,0.1),lwd=1,col='lightgrey')
+legend(x=3,y=0.7,fill=Col,bty='n',cex=1, 
+       legend=c('single-term','multi-terms(1st)','multi-terms(2nd)'))
+mtext('Nomination Speeches',side=3,line=1,cex=1.5,font=2)
+
+```
+
+From the grouped barplot shown above, we can easily see that in both inaugural and nomination speeches, Presidents who owned only one term more obviously displayed their sentiments in speeches than those with multi-terms, especially anger and trust in both kinds of speeches, and disgust, fear and sadness in nomination speeches. This outcome is more than interesting and make us think about that whether totally display those sentiments towards voters would affect the continuous-term of Presidents? Perhaps more revealable sentiments would distort the character of Presidents towards voters. 
+
+Whether those subtle differences of sentiment can roughly classify all the Presidents into two groups? We use the mean values of 8 different sentiments to do k-means cluster analysis, especially set k = 2.
+```{r}
+# Inaugural speeches
+single_term_inaug_sent.list$term_type<-'single'
+multi_terms_inaug_sent1.list$term_type<-'multi'
+multi_terms_inaug_sent2.list$term_type<-'multi'
+inaug_sent.list<-as.data.frame(rbind(single_term_inaug_sent.list, multi_terms_inaug_sent1.list,
+                                     multi_terms_inaug_sent2.list))
+inaug_presid.summary=tbl_df(inaug_sent.list)%>%
+  group_by(File)%>%
+  summarise(
+    anger=mean(anger),
+    anticipation=mean(anticipation),
+    disgust=mean(disgust),
+    fear=mean(fear),
+    joy=mean(joy),
+    sadness=mean(sadness),
+    surprise=mean(surprise),
+    trust=mean(trust),
+    negative=mean(negative),
+    positive=mean(positive),
+    term_type=unique(term_type)
+  )
+inaug_presid.summary=as.data.frame(inaug_presid.summary)
+rownames(inaug_presid.summary)=as.character(inaug_presid.summary[,1])
+km.res=kmeans(inaug_presid.summary[,-c(1,ncol(inaug_presid.summary))], iter.max=200, centers=2)
+fviz_cluster(km.res, stand=FALSE, repel= TRUE,
+             data = inaug_presid.summary[,-c(1,ncol(inaug_presid.summary))], 
+             xlab='', xaxt='n', ylab='', show.clust.cent=FALSE)
+table(inaug_presid.summary$term_type,as.vector(km.res$cluster))
+
+
+# Nomination speeches
+single_term_nomin_sent.list$term_type<-'single'
+multi_terms_nomin_sent1.list$term_type<-'multi'
+multi_terms_nomin_sent2.list$term_type<-'multi'
+nomin_sent.list<-as.data.frame(rbind(single_term_nomin_sent.list, multi_terms_nomin_sent1.list, 
+                       multi_terms_nomin_sent2.list))
+nomin_presid.summary=tbl_df(nomin_sent.list)%>%
+  group_by(File)%>%
+  summarise(
+    anger=mean(anger),
+    anticipation=mean(anticipation),
+    disgust=mean(disgust),
+    fear=mean(fear),
+    joy=mean(joy),
+    sadness=mean(sadness),
+    surprise=mean(surprise),
+    trust=mean(trust),
+    negative=mean(negative),
+    positive=mean(positive),
+    term_type=unique(term_type)
+  )
+nomin_presid.summary=as.data.frame(nomin_presid.summary)
+rownames(nomin_presid.summary)=as.character(nomin_presid.summary[,1])
+km.res=kmeans(nomin_presid.summary[,-c(1,ncol(nomin_presid.summary))], iter.max=200, centers=2)
+fviz_cluster(km.res, stand=FALSE, repel= TRUE,
+             data = nomin_presid.summary[,-c(1,ncol(nomin_presid.summary))], 
+             xlab='', xaxt='n', ylab='', show.clust.cent=FALSE)
+table(nomin_presid.summary$term_type,as.vector(km.res$cluster))
+
+```
+
+From the outcomes of clustering shown above, the k-means algorithm cannot successfully classify those Presidents into two groups by just using the mean values of each sentiment. 
+
+
+#####Conclusion:
+
+From above analysis we can conclude that there is not much but still a little distinct difference between one-term Prsidents and multi-terms Presidents in their nomination and inaugural speeches, especially in the aspects of word frequency, length of sentence and sentiments. 
+
+From the word frequency analysis, the most popular words are roughly the same in both inaugural and nomination speeches. However, thers are still some words, like 'american' and 'new', appeared much ofter in nomination speeches with those Presidents who performed multi-terms. Although this is subtle difference which can be hardly seen, perhaps it changes what voters think.
+
+From the analysis of length of sentences, we find that almost all the Presidents prefered short sentences within 15 words in their speeches. More specifically, Presidents who owned multi-terms enjoyed a slightly longer sentences and more diverse length of sentences in their speeches.
+
+From sentiments analysis, we find something interesting that Presidents who performed only one term more obviously displayed their sentiments in both kinds of speeches than those with multi-terms, especially in the senses of anger, disgust and trust. It is intuitive since performing a speech is a direct way for Presidents to convey their thoughts and ideas towards people, exaggratively indicate their sentiments would conduct into a opposite outcome.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
