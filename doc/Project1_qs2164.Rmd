@@ -1,12 +1,12 @@
 ---
-title: Is there any differences between one-term Prsidents and multi-terms Presidents
+title: Is there any differences between one-term Presidents and multi-terms Presidents
   in their nomination and inaugural speeches?
 output:
   html_document: default
   html_notebook: default
 ---
 
-Nomination and inaugural speeches are the first step of Presidents. These speeches indicate what Presidents advocate and what's intended policy they would conduct during tenure, which undoubtedly affect the decision of voters. However, some Presidents owned only one term while others perfromed two-or-more terms? What's the reason? Is it possible that these can be seen from their nominaiton and inaugural speeches, which convey their thoughts directly to voters? 
+Nomination and inaugural speeches are the first step of Presidents. These speeches indicate what Presidents advocate and what's intended policy they would conduct during tenure, which undoubtedly affect the decision of voters. However, some Presidents owned only one term while others performed two-or-more terms? What's the reason? Is it possible that these can be seen from their nominaton and inaugural speeches, which convey their thoughts directly to voters? 
 In this project, we would analyze the nomination and inaugural speeches of past presidents, and try to figure out whether there is any differences between those one-term Presidens and multi-terms Presidents in their speeches, or on the opposite way, their differences cannot be figured out from just speeches. 
 
 
@@ -14,7 +14,7 @@ In this project, we would analyze the nomination and inaugural speeches of past 
 ```{r, message=FALSE, warning=FALSE}
 packages.used=c("rvest", "tibble", "qdap", "sentimentr", 
                 "gplots", "dplyr","tm", "syuzhet", 
-                "factoextra", "gridExtra", "scales", "RColorBrewer",
+                "factoextra", "scales", "RColorBrewer",
                 "RANN", "topicmodels","wordcloud","tidytext","ggridges","ggplot2")
 
 # check packages that need to be installed.
@@ -43,7 +43,6 @@ library("RANN")
 library("topicmodels")
 library("wordcloud")
 library("tidytext")
-library("gridExtra")
 library('ggridges')
 library('ggplot2')
 
