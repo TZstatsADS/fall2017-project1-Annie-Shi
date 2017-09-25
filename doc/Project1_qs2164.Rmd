@@ -499,28 +499,3 @@ From the word frequency analysis, the most popular words are roughly the same in
 From the analysis of length of sentences, we find that almost all the Presidents prefered short sentences within 15 words in their speeches. More specifically, Presidents who owned multi-terms enjoyed a slightly longer sentences and more diverse length of sentences in their speeches.
 
 From sentiments analysis, we find something interesting that Presidents who performed only one term more obviously displayed their sentiments in both kinds of speeches than those with multi-terms, especially in the senses of anger, disgust and trust. It is intuitive since performing a speech is a direct way for Presidents to convey their thoughts and ideas towards people, exaggratively indicate their sentiments would conduct into a opposite outcome.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
